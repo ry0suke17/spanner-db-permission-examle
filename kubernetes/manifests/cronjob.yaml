@@ -1,0 +1,84 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cronjob
+  labels:
+    app: cronjob
+spec:
+  schedule: "* * * * *"
+  suspend: true
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 60
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      completions: 1
+      parallelism: 1
+      ttlSecondsAfterFinished: 300
+      template:
+        metadata:
+          labels:
+            app: cronjob
+        spec:
+          restartPolicy: Never
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: cloud.google.com/gke-nodepool
+                        operator: In
+                        values:
+                          - default-pool
+          containers:
+            - name: gcloud
+              command:
+                - bash
+              args:
+                - -c
+                - |
+                  #!/bin/bash
+
+                  set -eu
+
+                  echo ${GOOGLE_APPLICATION_CREDENTIALS}
+
+                  gcloud spanner instances list
+
+                  echo "db=${DATABASE}, project=${PROJECT_ID}, instance=${INSTANCE}"
+
+                  gcloud spanner databases execute-sql ${DATABASE} --project=${PROJECT_ID} --instance=${INSTANCE} --format=json --sql="select * from t1 limit 1"
+
+              env:
+                - name: GOOGLE_APPLICATION_CREDENTIALS
+                  value: /var/secrets/google/credentials.json
+                - name: INSTANCE
+                  valueFrom:
+                    configMapKeyRef:
+                      name: configmap
+                      key: instance
+                - name: PROJECT_ID
+                  valueFrom:
+                    configMapKeyRef:
+                      name: configmap
+                      key: projectId
+                - name: DATABASE
+                  valueFrom:
+                    configMapKeyRef:
+                      name: configmap
+                      key: database
+              image: google/cloud-sdk:473.0.0-alpine
+              imagePullPolicy: Always
+              volumeMounts:
+                - mountPath: /var/secrets/google
+                  name: gcp-credentials
+                  readOnly: true
+          volumes:
+            - name: gcp-credentials
+              secret:
+                secretName: gcp-service-account
+            - name: configmap
+              configMap:
+                name: configmap
