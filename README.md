@@ -1,0 +1,1 @@
+# spanner-db-permission-examle
